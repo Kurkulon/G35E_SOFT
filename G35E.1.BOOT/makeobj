@@ -1,0 +1,265 @@
+
+##################################################################################################
+
+!ifndef version
+version = Release
+!endif
+
+##################################################################################################
+
+curdir = $+ $(%cdrive):$(%cwd) $-
+hdir = cpp
+libdir = $(curdir)\..\..\G_LIBS
+bindir = $(%ARMCC50BIN)
+ghdir = $(curdir)\..\..\Include,$(curdir)\..\Include
+
+##################################################################################################
+
+!ifeq version Debug
+
+libsuffix = d
+
+!else 
+
+libsuffix = r
+
+!endif
+
+##################################################################################################
+
+target_name = G35E.1.BOOT #$(targetcpu)
+
+##################################################################################################
+
+!ifeq targetcpu SAME53
+
+buildtool = ARMCC
+cpu_compiler_options = --cpu=CORTEX-M4.fp.sp --thumb -DBOOTLOADER
+cpu_asm_options = --cpu CORTEX-M4.fp.sp --apcs /interwork --pd "BOOTLOADER SETA 1" --pd "__PROGNAME__ SETS \"BOOT G35E.1(AR UPR)-3.1\""
+cpu_link_options = --cpu CORTEX-M4.fp.sp
+cpu_obj = $(objdir)\startup_CM4.o
+cpu_scatter = $(libdir)\Scatter\SAME53_BOOT.sct
+
+!else ifeq targetcpu BF607
+
+buildtool = ADSP
+adsp_core_opt = BOOTLOADER
+adsp_cpu_opt = -proc ADSP-BF607 -si-revision 0.2 
+adsp_cache_opt = USE_CACHE_C_A_B
+adsp_memmap_opt = USE_L1_CODE_DA_DB
+adsp_comp_opt = -D$(adsp_cache_opt) -D$(adsp_memmap_opt) -D$(adsp_core_opt)
+adsp_loader_opt = -bcode 13
+adsp_link_opt = -T $(libdir)\LDF\BF607.ldf -flags-link -e,-MDADI_CCES,-MD__cplusplus,-MDNO_UTILITY_ROM,-MDUSING_ICACHE_DISABLE_INIT_CODE,-MD$(adsp_cache_opt),-MD$(adsp_memmap_opt),-MD$(adsp_core_opt)
+adsp_startup_obj = $(objdir)\startup_BF607.o
+initcode_name = $(libdir)\build\$(targetcpu)_$(version)\initcode_osc25.dxe
+
+!else
+
+cpu_compiler_options =
+cpu_asm_options =
+cpu_link_options =
+cpu_obj =
+cpu_scatter =
+
+!endif
+
+
+##################################################################################################
+
+libname = $(libdir)\$(targetcpu)_$(libsuffix).a
+
+##################################################################################################
+
+.ERASE
+.EXTENSIONS:
+.EXTENSIONS: .dxe .o .cpp .h .s .d
+
+##################################################################################################
+
+.cpp:	$(cppdir)
+.o:		$(objdir)
+.dxe:	$(objdir)
+.h:		$(hdir)
+.d:		$(objdir)
+
+!ifeq buildtool ARMCC
+.s: 	$(cppdir);$(libdir)\cpp\ARM
+!else ifeq buildtool ADSP
+.s: 	$(cppdir);$(libdir)\cpp\ADSP
+!endif
+
+##################################################################################################
+
+.BEFORE
+	@if NOT EXIST $(objdir) @md $(objdir) >nul
+	@call echo Building $(version) version ...
+	@call buildnum.bat
+
+
+##################################################################################################--diag_suppress=68,368,1165,1299,3017
+
+!ifeq buildtool ARMCC
+
+bindir = $(%ARMCC50BIN)
+
+!ifeq version Debug
+debug_compiler_options = -O0 --debug -D_DEBUG --remarks --diag_suppress=96,1301,2530,2815
+debug_linker_options = DEBUG ALL
+!else
+debug_compiler_options = -O3 -Otime --debug
+debug_linker_options = 
+!endif
+
+!else ifeq buildtool ADSP
+
+bindir = $(%ADI_CCES)
+
+!ifeq version Debug
+debug_compiler_options = -O0 -D_DEBUG
+debug_linker_options = 
+!else
+debug_compiler_options = -Oa -ipa
+debug_linker_options = 
+!endif
+
+!else
+
+
+!endif
+
+##################################################################################################
+
+arm_compiler_options = $(debug_compiler_options) $(cpu_compiler_options) --gnu --asm --interleave -g -c --diag_style=ide &
+	  --feedback "$(objdir)\$(target_name).fed"  &
+	 -D__MICROLIB -DCPU_$(targetcpu) --no_depend_system_headers --reduce_paths -J$(libdir)\cpp,"$(%ARMCC50INC)" -I$(ghdir)
+
+##################################################################################################
+
+arm_asm_options = $(cpu_asm_options) -g --xref --diag_style=ide --pd "__MICROLIB SETA 1" --pd "CPU_$(targetcpu) SETA 1" --cpreproc
+
+##################################################################################################
+
+arm_link_options = $(cpu_link_options) --bestdebug --strict --map --xref --callgraph --symbols --summary_stderr --library_type=microlib
+  
+##################################################################################################-wd4996
+
+
+##################################################################################################
+
+
+##################################################################################################
+
+adsp_compiler_options = $(debug_compiler_options) -c -c++11 -g++ -g -structs-do-not-overlap -no-std-templates -no-multiline -save-temps -path-output $(objdir) &
+	-double-size-32 -decls-strong -ipa -warn-protos $(adsp_cpu_opt) $(adsp_comp_opt) -DCPU_$(targetcpu) -Wterse -I$(libdir)\cpp,$(ghdir)
+
+##################################################################################################
+
+adsp_asm_options = $(adsp_cpu_opt) $(adsp_comp_opt) -g -Wno-info -DADI_CCES
+
+##################################################################################################
+
+adsp_link_options = $(adsp_cpu_opt) $(adsp_link_opt) -no-mem -add-debug-libpaths -flags-link @$(objdir)\link_input.txt
+
+##################################################################################################
+
+!include $(objdir)\mkoutcpp
+!include $(objdir)\mkoutobj
+
+##################################################################################################
+#
+#	$$ 	represents the character "$"
+#	$# 	represents the character "#"
+#	$@ 	full file name of the target
+#	$* 	target with the extension removed
+#	$< 	list of all dependents
+#	$? 	list of dependents that are younger than the target
+#	
+#	a:\dir\target.ext : b:\dir1\dep1.ex1 c:\dir2\dep2.ex2
+#	
+#	$^@ 	a:\dir\target.ext
+#	$^* 	a:\dir\target
+#	$^& 	target
+#	$^. 	target.ext
+#	$^: 	a:\dir\
+#		
+#	$[@ 	b:\dir1\dep1.ex1
+#	$[* 	b:\dir1\dep1
+#	$[& 	dep1
+#	$[. 	dep1.ex1
+#	$[: 	b:\dir1\
+#		
+#	$]@ 	c:\dir2\dep2.ex2
+#	$]* 	c:\dir2\dep2
+#	$]& 	dep2
+#	$]. 	dep2.ex2
+#	$]: 	c:\dir2\
+#
+##################################################################################################
+
+!ifeq buildtool ARMCC
+
+$(objdir)\$(target_name).axf : $(cpu_obj) $(modules_obj) 
+	@echo Linking ...
+	@$(bindir)\armlink	$(arm_link_options) &
+	--feedback "$^*.fed" &
+	--scatter $(cpu_scatter) &
+	--list "$^&.map" &
+	-o "$^@" $(cpu_obj) $(modules_obj) $(libname)
+	@rem $(bindir)\fromelf --i32 --output .\OBJ\$^&.hex $^@ 
+	@$(bindir)\fromelf --bin --output .\OBJ\$^&.bin $^@ 
+	@$(bindir)\fromelf --text -z $^@ 
+	@if NOT EXIST .\OBJ @md .\OBJ >nul
+	@copy /Y $^@ .\OBJ\ >nul
+
+!else ifeq buildtool ADSP
+
+$(objdir)\$(target_name).ldr : $(target_name).dxe $(initcode_name)
+	@"$(bindir)\elfloader" $(adsp_cpu_opt) $(adsp_loader_opt) -v -init $(initcode_name) -f binary -b SPI -o "$^@" -dmawidth 8 -width 8 $(objdir)\$(target_name).dxe
+
+$(target_name).dxe : $(adsp_startup_obj) $(modules_obj) $(libname)
+    @echo Linking...
+    @echo -Map "$(objdir)\$^&_$(buildtool).xml" > $(objdir)\link_input.txt
+	@"$(bindir)\ccblkfn" $(adsp_link_options) -o "$(objdir)\$^." $< 
+
+
+!endif
+	
+##################################################################################################
+
+!include $(objdir)\mkoutdep
+
+##################################################################################################
+
+!ifeq buildtool ARMCC
+
+.cpp.o:
+	@echo Compiling $[. ...
+	@$(bindir)\armcc $(arm_compiler_options) --depend="$(objdir)\$^&.d" -o "$(objdir)\$^." $[@
+
+.s.o:
+	@echo Assembling $[. ...
+	@$(bindir)\armasm $(arm_asm_options) --list $(objdir)\$^&.lst  -o $(objdir)\$^. $[@	
+
+##################################################################################################
+
+!else ifeq buildtool ADSP
+ 
+.cpp.o:
+	@echo Compiling $[. ...
+	@$(libdir)\ccbl.bat $(adsp_compiler_options) -save-temps -path-output $^: -i -absolute-path-dependencies -MD -Mo="$^*.d" -o "$^@" $[@
+
+.s.o:
+	@echo Assembling $[. ...
+	@$(libdir)\easmbl.bat $(adsp_asm_options) -l $^*.lst  -o $^@ $[@	
+
+##################################################################################################
+
+!else
+
+.cpp.o:	.AUTODEPEND
+	@cl $(win32_compiler_options) -Fo"$(objdir)\$^." $[@
+
+##################################################################################################
+
+!endif
+
